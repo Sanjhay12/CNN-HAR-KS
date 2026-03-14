@@ -1,6 +1,9 @@
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
+import torch
+from torch.utils.data import Dataset, DataLoader 
+import torch.nn as nn
 """
 This function will help build all 16 components of the KS
 """
@@ -112,4 +115,43 @@ def normalise_images(images_train, images_test): #the images array will be split
     test_scaled = flat_test_scaled.reshape(images_test.shape)
     return  train_scaled.astype(np.float32), test_scaled.astype(np.float32)
 
+
+class RVDataset(Dataset):
+    def __init__(self, images, labels):
+        self.x = torch.tensor(images, dtype = torch.float32)
+        self.y = torch.tensor(labels, dtype = torch.long)
+
+        def __len__(self):
+            return len(self.y)
+        def __getitem__(self, idx):
+            return self.x[idx], self.y[idx]
+        
+
+        
+class CNN_HAR_KS(nn.Module):
+    def __init__(self, dropout):
+        super().__init__()
+
+        self.conv_block = nn.Sequential(
+            nn.Conv2d(1,32,kernel_size = 3, padding = 1), #appllies 32 filters of size 3x3, should be output 16x16 due to padding, final output is (32,16,16)
+            nn.ReLU(),
+            nn.Conv2d(32,64,kernel_size = 3, padding = 1),#dtakes 32 channels instead of 1, output here is (64,16,16)
+            nn.ReLU(),
+            #note that 1 channel means just raw pixel values and 32 chanelles mean more filtered versions of the image
+            nn.MaxPool2d(kernel_size=2, stride = 2), #halfs from 16x16 spatial dimension to 8x8 so (64,8,8)
+            nn.Dropout(p=dropout) #prevents overfitting
+#shape after all this is 64*8*8 
+
+        )
+        self.fc_block = nn.Sequential(
+            nn.Flatten(), #flattens 64*8*8 into 1D vector 
+            nn.Linear(64*8*8, 64), #dense layer has 4096 inputs to 64 outputs, learns which features are mosst useful for predicting vol direction
+            nn.ReLU(), #activation layer
+            nn.Linear(64,2),#final layer is 2 outputs, vol up or down for each
+        ) 
+
+def forward(self,x):
+    x = self.conv_block(x)
+    x = self.fc_block(x)
+    return x #produces two numbers for vol up and down, higher number is the predicted
 
