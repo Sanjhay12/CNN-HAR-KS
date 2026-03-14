@@ -58,3 +58,29 @@ def build_HAR_components(df):
         "TQ": TQ
     }, index = df.index)
     return KS_Components
+
+components_inorder = ["RV", "BPV", "ABD_jump", "ABD_CSP", "BNS_jump", "BNS_CSP", "Jo_jump", "Jo_CSP", "RS_positive", "RS_negative", "ret", "SJ", "SJ_positive", "SJ_negative", "negative_RV", "TQ "]#rows of the 16x16 image
+
+#This is what the CNN will refer to later when processing 16x16 image
+def build_labels(KS_components):
+    RV = KS_components["RV"].values
+
+    label = np.where(np.roll(RV, -1) < RV, 1, 0) #looks at tomorrow and today and if threshold met, then produces 1 or 0
+    label[-1] = 0 #last day has no tomorrow 
+    return label 
+
+#note that the image is 16x16 where 16 rows ar e the HAR components above and the 16 columns are the components over different time windows
+
+def compute_rolling_window(series, lags): #lag is time horizon, series is one column of one of the KS components
+    length = len(series) 
+    arr = np.zeros((length, len(lags))) #creates empty array of n rows(days) and 16 columns
+    #we use 16 different horizons, and length n for now 
+    #16 time horizons means 16 columns
+    for i, lag in enumerate(lags):
+        if lag == 1:
+            arr[:, i] = series #window of 1 requires doing nothing, use the raw
+        else:
+            arr[:,i] = pd.Series(series).rolling(lag, min_periods=1).mean().values #for window of 2,3,5,10,21, we compute the rolling mean over the window size and fill in the array column by column
+
+    return arr #essentially, go through every day per lag and do rolling window mean stuff and repeat for every lag 
+
