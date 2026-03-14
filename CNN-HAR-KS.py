@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from sklearn.preprocessing import StandardScaler
 """
 This function will help build all 16 components of the KS
 """
@@ -12,7 +13,7 @@ def build_HAR_components(df):
     abs_ret = np.abs(ret)#absolute return
     BPV = np.concatenate([[0.0], abs_ret[:-1]*abs_ret[1:]]) #multiply consecutive returns, NOTE: we append 0 at the front because the product would lead to n-1 values instead
     
-    BPV_std = pd.Series.rolling(21, min_periods=5).std().values #computes std of BPV over 21 day windoe for each day
+    BPV_std = pd.Series(BPV).rolling(21, min_periods=5).std().values #computes std of BPV over 21 day windoe for each day
     BPV_std = np.nan_to_num(BPV_std, nan=1e-8) #any values with Nan in BPV_std can be replaced with a negligable number for data processing 
     BPV_std = np.where(BPV_std == 0, 1e-8, BPV_std) #any values with 0 in BPV_std can be replaced with a negligable number for data processing
     #we ensure std is not 0 or Nan as we dividde in jumps
@@ -83,4 +84,32 @@ def compute_rolling_window(series, lags): #lag is time horizon, series is one co
             arr[:,i] = pd.Series(series).rolling(lag, min_periods=1).mean().values #for window of 2,3,5,10,21, we compute the rolling mean over the window size and fill in the array column by column
 
     return arr #essentially, go through every day per lag and do rolling window mean stuff and repeat for every lag 
+
+lags = [1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+
+
+def build_images(components):
+    n = len(components) #number of days found in the KS_components df returned above
+    images = np.zeros((n,16,16), dtype = np.float32) #creates empty array of n rows(days) and 16 columns and 16 layers (for the 16 components)
+
+    for i, column in enumerate(components_inorder):
+        windowed = compute_rolling_window(components[column].values, lags) #for each component, we compute the rolling window for each of the 16 lags and get a n by 16 array
+        images[:,i,:] = windowed #we fill in the 16 layers of the image with the windowed data for each component, so we get a n by 16 by 16 array at the end
+        #all days, just component i, all lags
+        #n images of 2D 16 by 16 
+    return images[:, np.newaxis, :, :] #we add a new axis for the channel dimension, so we get a n by 1 by 16 by 16 array at the end, which is what the CNN will take in as input
+#CNN requires inpout in format of (batch, channels, height, width)
+
+def normalise_images(images_train, images_test): #the images array will be split into 60%, 40% for training, testing
+
+    images_train_num = images_train.shape[0] #first dimension is n which is number if images
+    flat_train = images_train.reshape(images_train_num, -1)#goes from (n,1,16,16) format to (n,256)
+    scaler = StandardScaler() #scaler object that will subtract mean and div std, this WILL DO THE SCALING OF ALL VALUES TO SAME FOR CNN
+    flat_train_scaled = scaler.fit_transform(flat_train) #fit the scaler to the training data and transform it, so we get a (n,256) array of scaled values for the training data
+    flat_test = images_test.reshape(images_test.shape[0], -1)
+    flat_test_scaled = scaler.transform(flat_test)
+    train_scaled = flat_train_scaled.reshape(images_train.shape) #goes back to (n,1,16,16) format for the CNN
+    test_scaled = flat_test_scaled.reshape(images_test.shape)
+    return  train_scaled.astype(np.float32), test_scaled.astype(np.float32)
+
 
