@@ -4,6 +4,7 @@ from sklearn.preprocessing import StandardScaler
 import torch
 from torch.utils.data import Dataset, DataLoader 
 import torch.nn as nn
+import torch.optim as optim
 """
 This function will help build all 16 components of the KS
 """
@@ -155,3 +156,65 @@ def forward(self,x):
     x = self.fc_block(x)
     return x #produces two numbers for vol up and down, higher number is the predicted
 
+def train_model(model, train_loader, val_loader, max_epochs, lr, min_lr, l2, patience):
+    #model is the CNN_HAR_KS model we defined, train_loader is training images and labels, val_loader is validation images, rest is all technical ML stuff like iterations, learning rate etc.
+    model = model.to(torch.device) #move model to GPU if available
+    criterion = nn.CrossEntropyLoss()#loss func we are using
+    optimizer = optim.Adam(model.parameters(), lr = lr, weight_decay = l2) #optimizer we are using, weight decay is L2 regularization to prevent overfitting
+    #above adjusts model weights 
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=patience//2, min_lr = min_lr) #learning rate scheduler that reduces learning rate if validation loss does not improve for a certain number of epochs (patience)
+    #when val loss decreases for these many eopochs i.e. patience above, then half learning rate but never reduce below the min lr we set
+    #essentially, if model is not improving then we reduce learning rate to find better weights to not overshoot
+
+
+    best_val_loss = float("inf")
+    best_state = None
+    no_improve = 0
+    history = {"train_loss": [], "val_loss": [], "val_acc": []} #val_acc is validation accuracy, correct predictions/total validation days
+    for epoch in range(1, max_epochs+1):
+        model.train()
+        train_loss = 0.0
+        for X_batch, y_batch in train_loader: #y_batch is the true labels
+            X_batch, y_batch = X_batch.to(torch.device), y_batch.to(torch.device)
+            optimizer.zero_grad() #clears old gradients
+            logits = model(X_batch) #passes image batch into CNN to get 2 scores per image
+            loss = criterion(logits, y_batch) #compares prediced with true labels
+            loss.backward() #computes gradients of loss with respect to model parameters
+            optimizer.step() #updates weights 
+            train_loss += loss.item() * len(y_batch)
+        train_loss /= len(train_loader.dataset)
+
+        model.eval()
+        val_loss = 0.0
+        correct = 0
+        with torch.no_grad():
+            for X_batch, y_batch in val_loader:
+                X_batch, y_batch = X_batch.to(torch.device), y_batch.to(torch.device)
+                logits = model(X_batch)
+                loss = criterion(logits, y_batch)
+                val_loss += loss.item() * len(y_batch)
+                preds = torch.argmax(logits, dim=1) #takes the higher score of the two for each image to get predicted label
+                correct += (preds == y_batch).sum().item() #compares predicted with true labels to count correct predictions
+        val_loss /= len(val_loader.dataset)
+        val_acc = correct / len(val_loader.dataset)
+
+        scheduler.step(val_loss) #updates learning rate based on validation loss, this will have effects on adjusting weights in next epcoh training, val does not adjust weights
+        history["train_loss"].append(train_loss)
+        history["val_loss"].append(val_loss)
+        history["val_acc"].append(val_acc)
+
+    
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_state = {{k: v.cpu().clone() for k, v in model.state_dict().items()}} #scave copy of current models weights and biases
+            no_improve = 0
+        else:
+            no_improve += 1
+            if no_improve >= patience:
+                print("Early stopping at epoch {epoch} with best val loss {best_val_loss:.4f}, train loss {train_loss:.4f}, and val_acc {val_acc:.4f}".format(epoch, best_val_loss, train_loss, val_acc))
+                break
+        if epoch % 50 == 0:
+            print("Epoch {epoch}: Train Loss {train_loss:.4f}, Val Loss {val_loss:.4f}, Val Acc {val_acc:.4f}".format(epoch, train_loss, val_loss, val_acc))
+
+    model.load_state_dict(best_state)
+    return history 
