@@ -5,6 +5,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader 
 import torch.nn as nn
 import torch.optim as optim
+from sklearn.metrics import accuracy_score, roc_auc_score, confusion_matrix
 """
 This function will help build all 16 components of the KS
 """
@@ -198,7 +199,7 @@ def train_model(model, train_loader, val_loader, max_epochs, lr, min_lr, l2, pat
         val_loss /= len(val_loader.dataset)
         val_acc = correct / len(val_loader.dataset)
 
-        scheduler.step(val_loss) #updates learning rate based on validation loss, this will have effects on adjusting weights in next epcoh training, val does not adjust weights
+        scheduler.step(val_loss) #updates learning rate based on validation loss i.e. how many epcohs in a row val_loss does not improve, this will have effects on adjusting weights in next epcoh training, val does not adjust weights
         history["train_loss"].append(train_loss)
         history["val_loss"].append(val_loss)
         history["val_acc"].append(val_acc)
@@ -218,3 +219,40 @@ def train_model(model, train_loader, val_loader, max_epochs, lr, min_lr, l2, pat
 
     model.load_state_dict(best_state)
     return history 
+
+def evaluate(model, loader): #loader here is the test_loader to look at accuracy of predictions of  unseen data
+    model.eval()
+    softmax = nn.Softmax(dim=1) #converts the logits into probabilities
+    #arrays with list of 1s and 0s; all_lables are true answers, all_preds are predictions and all_probs are probability of 1
+    all_preds = []
+    all_labels = []
+    all_probs = []
+    with torch.no_grad():
+        for X_batch, y_batch in loader:
+            X_batch = X_batch.to(torch.device)
+            logits = model(X_batch) #pass images through CNN and get scores for ech image
+            probs = softmax(logits)[:,1].cpu().numpy() #converts scores of class 1 to probabilites and move to cpu and convert to numpy
+            preds = logits.argmax(dim=1).cpu().numpy()#takes higher score as prediction
+            all_preds.extend(preds)
+            all_labels.extend(y_batch.cpu().numpy())
+            all_probs.extend(probs)
+    y_true, y_pred, y_prob = np.array(all_labels), np.array(all_preds), np.array(all_probs)
+    accuracy = accuracy_score(y_true, y_pred)
+    auc = roc_auc_score(y_true, y_prob)
+    cm = confusion_matrix(y_true, y_pred)
+
+    TP = cm[1,1]
+    TN = cm[0,0]
+    FP = cm[0,1]
+    FN = cm[1,0]
+    sensitivity = TP / (TP + FN)
+    specificity = TN / (TN + FP)
+    youden = sensitivity + specificity - 1
+
+    return {
+        "accuracy":    accuracy,
+        "auc":         auc,
+        "sensitivity": sensitivity,
+        "specificity": specificity,
+        "youden":      youden,
+    }
