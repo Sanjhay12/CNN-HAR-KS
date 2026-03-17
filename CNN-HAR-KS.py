@@ -5,7 +5,39 @@ import torch
 from torch.utils.data import Dataset, DataLoader 
 import torch.nn as nn
 import torch.optim as optim
+from matplotlib import pyplot as plt
 from sklearn.metrics import accuracy_score, roc_auc_score, confusion_matrix
+
+train_ratio = 0.60
+batch_size = 16
+max_epochs = 3000
+lr = 1e-3
+min_lr = 1e-4
+dropout = 0.3
+l2_rate = 1e-3
+patience = 50
+val_ratio = 0.15
+random_seed = 42
+
+CSV_PATH = "SPY.csv"
+date_col = "Date"
+close_col = "Adj Close"
+return_col = "market_return"
+
+#data loading
+def load_data(path: str) -> pd.DataFrame:
+    df = pd.read_csv(path, parse_dates=[date_col])
+    df = df.sort_values(date_col).reset_index(drop=True)
+
+    # Use pre-computed market_return if available, else compute from Adj Close
+    if return_col in df.columns and df[return_col].notna().sum() > 100:
+        df["ret"] = df[return_col]
+    else:
+        df["ret"] = df[close_col].pct_change()
+
+    df = df.dropna(subset=["ret"]).reset_index(drop=True)
+    return df
+
 """
 This function will help build all 16 components of the KS
 """
@@ -16,7 +48,7 @@ def build_HAR_components(df):
     RV = ret ** 2 #RV: Squared Daily return
 
     abs_ret = np.abs(ret)#absolute return
-    BPV = np.concatenate([[0.0], abs_ret[:-1]*abs_ret[1:]]) #multiply consecutive returns, NOTE: we append 0 at the front because the product would lead to n-1 values instead
+    BPV = np.concatenate([[0.0], abs_ret[:-1]*abs_ret[1:]]) #multiply consecutive returns, note: we append 0 at the front because the product would lead to n-1 values instead
     
     BPV_std = pd.Series(BPV).rolling(21, min_periods=5).std().values #computes std of BPV over 21 day windoe for each day
     BPV_std = np.nan_to_num(BPV_std, nan=1e-8) #any values with Nan in BPV_std can be replaced with a negligable number for data processing 
@@ -256,3 +288,105 @@ def evaluate(model, loader): #loader here is the test_loader to look at accuracy
         "specificity": specificity,
         "youden":      youden,
     }
+
+
+#Plotting graphs: note that if val loss rises and train loss falls, then there is overfitting
+def plot_training_history(history: dict):
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+
+    axes[0].plot(history["train_loss"], label="Train loss")
+    axes[0].plot(history["val_loss"],   label="Val loss")
+    axes[0].set_title("Cross-Entropy Loss")
+    axes[0].set_xlabel("Epoch")
+    axes[0].legend()
+
+    axes[1].plot(history["val_acc"], label="Val accuracy", color="green")
+    axes[1].set_title("Validation Accuracy")
+    axes[1].set_xlabel("Epoch")
+    axes[1].legend()
+
+    plt.tight_layout()
+    plt.savefig("training_history.png", dpi=150)
+    plt.show()
+    print("Saved: training_history.png")
+
+
+def plot_sample_images(images: np.ndarray, labels: np.ndarray, n: int = 4):
+    #visualising the 16x16 HAR images
+    fig, axes = plt.subplots(1, n, figsize=(3 * n, 3))
+    for i in range(n):
+        axes[i].imshow(images[i, 0], aspect="auto", cmap="RdYlGn")
+        axes[i].set_title(f"Label: {'↓ vol' if labels[i] == 1 else '↑ vol'}")
+        axes[i].set_xlabel("Lag window")
+        axes[i].set_ylabel("HAR component")
+        axes[i].set_xticks(range(16))
+        axes[i].set_xticklabels(["L1"] + [f"MA{l}" for l in lags], rotation=90, fontsize=6)
+        axes[i].set_yticks(range(16))
+        axes[i].set_yticklabels(components_inorder, fontsize=6)
+    plt.tight_layout()
+    plt.savefig("sample_images.png", dpi=150)
+    plt.show()
+    print("Saved: sample_images.png")
+
+def main():
+    print("Loading data")
+    df = load_data(CSV_PATH)
+
+    print("Building HAR componnts")
+    components = build_HAR_components(df)
+    labels = build_labels(components)
+    print("Labels and components constructed")
+    print("Constructing 16x16 images")
+    drop = 21
+    valid_components = components.iloc[21:-1].reset_index(drop=True) #we drop the first 21 days as they have many NaN values due to rolling windows and we drop the last day as it has no label
+    labels_valid = labels[21:-1]
+    images = build_images(valid_components)
+    print("Images shape{} and now {} samples of 16x16 greyscale".format(images.shape, images.shape[0]))
+    print("Splitting into train and test sets")
+    n = len(labels_valid)
+    n_train = int(n*train_ratio)
+    n_val = int(n*val_ratio)
+    n_train = n_train-n_val
+    x_train_raw = images[:n_train]
+    x_test_raw = images[n_train:]
+    y_train = labels_valid[:n_train]
+    y_test = labels_valid[n_train:]
+
+    x_train_scaled, x_test_scaled = normalise_images(x_train_raw, x_test_raw)
+    x_train =x_train_scaled[:n_train]
+    x_val = x_train_scaled[n_train:]
+    y_train = y_train[:n_train]
+    y_val = y_train[n_train:]
+
+    print("Train : {}, Val: {}, Test: {}".format(len(y_train), len(y_val), len(y_test)))
+    plot_sample_images(x_train, y_train, n=4)
+    train_dataset = RVDataset(x_train, y_train)
+    val_dataset = RVDataset(x_val, y_val)
+    test_dataset = RVDataset(x_test_scaled, y_test)
+
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+
+    print("Trainnig CNN-HAR-KS model")
+    model = CNN_HAR_KS(dropout)
+    params_num = sum(p.numel() for p in model.parameters() if p.requires_grad) #done to check overfitting, number of weights_biases against the no of datapoints
+    print(f"Model has {params_num} trainable parameters")
+    print(model)
+    history = train_model(model, train_loader, val_loader, max_epochs, lr, min_lr, l2_rate, patience)
+    plot_training_history(history)
+    print("Evaluating on test set")
+    metrics = evaluate(model, test_loader)
+    print(f"  │  Accuracy    : {metrics['accuracy']:.4f}                   │")
+    print(f"  │  AUC         : {metrics['auc']:.4f}                   │")
+    print(f"  │  Sensitivity : {metrics['sensitivity']:.4f}                   │")
+    print(f"  │  Specificity : {metrics['specificity']:.4f}                   │")
+    print(f"  │  Youden Index: {metrics['youden']:.4f}│")
+    print("  └─────────────────────────────────────────┘")
+
+    torch.save(model.state_dict(), "cnn_har_ks_weights.pth")
+    print("Saved model weights to cnn_har_ks_weights.pth")
+    return model, metrics
+
+if __name__ == "__main__":
+    main()
