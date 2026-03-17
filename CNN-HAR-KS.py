@@ -97,7 +97,7 @@ def build_HAR_components(df):
     }, index = df.index)
     return KS_Components
 
-components_inorder = ["RV", "BPV", "ABD_jump", "ABD_CSP", "BNS_jump", "BNS_CSP", "Jo_jump", "Jo_CSP", "RS_positive", "RS_negative", "ret", "SJ", "SJ_positive", "SJ_negative", "negative_RV", "TQ "]#rows of the 16x16 image
+components_inorder = ["RV", "BPV", "ABD_jump", "ABD_CSP", "BNS_jump", "BNS_CSP", "Jo_jump", "Jo_CSP", "RS_positive", "RS_negative", "ret", "SJ", "SJ_positive", "SJ_negative", "negative_RV", "TQ"]#rows of the 16x16 image
 
 #This is what the CNN will refer to later when processing 16x16 image
 def build_labels(KS_components):
@@ -155,10 +155,10 @@ class RVDataset(Dataset):
         self.x = torch.tensor(images, dtype = torch.float32)
         self.y = torch.tensor(labels, dtype = torch.long)
 
-        def __len__(self):
-            return len(self.y)
-        def __getitem__(self, idx):
-            return self.x[idx], self.y[idx]
+    def __len__(self):
+        return len(self.y)
+    def __getitem__(self, idx):
+        return self.x[idx], self.y[idx]
         
 
         
@@ -184,10 +184,10 @@ class CNN_HAR_KS(nn.Module):
             nn.Linear(64,2),#final layer is 2 outputs, vol up or down for each
         ) 
 
-def forward(self,x):
-    x = self.conv_block(x)
-    x = self.fc_block(x)
-    return x #produces two numbers for vol up and down, higher number is the predicted
+        def forward(self, x):
+            x = self.conv_block(x)
+            x = self.fc_block(x)
+            return x #produces two numbers for vol up and down, higher number is the predicted
 
 def train_model(model, train_loader, val_loader, max_epochs, lr, min_lr, l2, patience):
     #model is the CNN_HAR_KS model we defined, train_loader is training images and labels, val_loader is validation images, rest is all technical ML stuff like iterations, learning rate etc.
@@ -239,7 +239,7 @@ def train_model(model, train_loader, val_loader, max_epochs, lr, min_lr, l2, pat
     
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            best_state = {{k: v.cpu().clone() for k, v in model.state_dict().items()}} #scave copy of current models weights and biases
+            best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()} #scave copy of current models weights and biases
             no_improve = 0
         else:
             no_improve += 1
@@ -345,14 +345,14 @@ def main():
     print("Splitting into train and test sets")
     n = len(labels_valid)
     n_train = int(n*train_ratio)
-    n_val = int(n*val_ratio)
+    n_val = int(n_train*val_ratio)
     n_train = n_train-n_val
     x_train_raw = images[:n_train]
     x_test_raw = images[n_train:]
     y_train = labels_valid[:n_train]
     y_test = labels_valid[n_train:]
 
-    x_train_scaled, x_test_scaled = normalise_images(x_train_raw, x_test_raw)
+    x_train_scaled, x_test_scaled =.reset_index() normalise_images(x_train_raw, x_test_raw)
     x_train =x_train_scaled[:n_train]
     x_val = x_train_scaled[n_train:]
     y_train = y_train[:n_train]
