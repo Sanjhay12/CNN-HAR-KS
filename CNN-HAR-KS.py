@@ -8,6 +8,9 @@ import torch.optim as optim
 from matplotlib import pyplot as plt
 from sklearn.metrics import accuracy_score, roc_auc_score, confusion_matrix
 
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
 train_ratio = 0.60
 batch_size = 16
 max_epochs = 3000
@@ -184,14 +187,14 @@ class CNN_HAR_KS(nn.Module):
             nn.Linear(64,2),#final layer is 2 outputs, vol up or down for each
         ) 
 
-        def forward(self, x):
-            x = self.conv_block(x)
-            x = self.fc_block(x)
-            return x #produces two numbers for vol up and down, higher number is the predicted
+    def forward(self, x):
+        x = self.conv_block(x)
+        x = self.fc_block(x)
+        return x #produces two numbers for vol up and down, higher number is the predicted
 
 def train_model(model, train_loader, val_loader, max_epochs, lr, min_lr, l2, patience):
     #model is the CNN_HAR_KS model we defined, train_loader is training images and labels, val_loader is validation images, rest is all technical ML stuff like iterations, learning rate etc.
-    model = model.to(torch.device) #move model to GPU if available
+    model = model.to(device) #move model to GPU if available
     criterion = nn.CrossEntropyLoss()#loss func we are using
     optimizer = optim.Adam(model.parameters(), lr = lr, weight_decay = l2) #optimizer we are using, weight decay is L2 regularization to prevent overfitting
     #above adjusts model weights 
@@ -208,7 +211,7 @@ def train_model(model, train_loader, val_loader, max_epochs, lr, min_lr, l2, pat
         model.train()
         train_loss = 0.0
         for X_batch, y_batch in train_loader: #y_batch is the true labels
-            X_batch, y_batch = X_batch.to(torch.device), y_batch.to(torch.device)
+            X_batch, y_batch = X_batch.to(device), y_batch.to(device) #move data to GPU if available
             optimizer.zero_grad() #clears old gradients
             logits = model(X_batch) #passes image batch into CNN to get 2 scores per image
             loss = criterion(logits, y_batch) #compares prediced with true labels
@@ -222,7 +225,7 @@ def train_model(model, train_loader, val_loader, max_epochs, lr, min_lr, l2, pat
         correct = 0
         with torch.no_grad():
             for X_batch, y_batch in val_loader:
-                X_batch, y_batch = X_batch.to(torch.device), y_batch.to(torch.device)
+                X_batch, y_batch = X_batch.to(device), y_batch.to(device)
                 logits = model(X_batch)
                 loss = criterion(logits, y_batch)
                 val_loss += loss.item() * len(y_batch)
@@ -261,7 +264,7 @@ def evaluate(model, loader): #loader here is the test_loader to look at accuracy
     all_probs = []
     with torch.no_grad():
         for X_batch, y_batch in loader:
-            X_batch = X_batch.to(torch.device)
+            X_batch = X_batch.to(device)
             logits = model(X_batch) #pass images through CNN and get scores for ech image
             probs = softmax(logits)[:,1].cpu().numpy() #converts scores of class 1 to probabilites and move to cpu and convert to numpy
             preds = logits.argmax(dim=1).cpu().numpy()#takes higher score as prediction
@@ -320,7 +323,7 @@ def plot_sample_images(images: np.ndarray, labels: np.ndarray, n: int = 4):
         axes[i].set_xlabel("Lag window")
         axes[i].set_ylabel("HAR component")
         axes[i].set_xticks(range(16))
-        axes[i].set_xticklabels(["L1"] + [f"MA{l}" for l in lags], rotation=90, fontsize=6)
+        axes[i].set_xticklabels([f"MA{l}" for l in lags], rotation=90, fontsize=6)
         axes[i].set_yticks(range(16))
         axes[i].set_yticklabels(components_inorder, fontsize=6)
     plt.tight_layout()
@@ -346,17 +349,18 @@ def main():
     n = len(labels_valid)
     n_train = int(n*train_ratio)
     n_val = int(n_train*val_ratio)
-    n_train = n_train-n_val
+    n_train_ = n_train-n_val
     x_train_raw = images[:n_train]
     x_test_raw = images[n_train:]
     y_train = labels_valid[:n_train]
     y_test = labels_valid[n_train:]
 
-    x_train_scaled, x_test_scaled =.reset_index() normalise_images(x_train_raw, x_test_raw)
-    x_train =x_train_scaled[:n_train]
-    x_val = x_train_scaled[n_train:]
-    y_train = y_train[:n_train]
-    y_val = y_train[n_train:]
+    x_train_scaled, x_test_scaled =normalise_images(x_train_raw, x_test_raw)
+    x_train =x_train_scaled[:n_train_]
+    x_val = x_train_scaled[n_train_:]
+    y_train_ = y_train[:n_train_]
+    y_val = y_train[n_train_:]
+    y_train = y_train_
 
     print("Train : {}, Val: {}, Test: {}".format(len(y_train), len(y_val), len(y_test)))
     plot_sample_images(x_train, y_train, n=4)
