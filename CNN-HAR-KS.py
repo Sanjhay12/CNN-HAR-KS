@@ -13,16 +13,16 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 train_ratio = 0.60
 batch_size = 16
-max_epochs = 3000
+max_epochs = 1000
 lr = 1e-3
 min_lr = 1e-4
-dropout = 0.3
-l2_rate = 1e-3
-patience = 50
+dropout = 0.5
+l2_rate = 1e-2
+patience = 30
 val_ratio = 0.15
 random_seed = 42
 
-CSV_PATH = "SPY.csv"
+CSV_PATH = "/content/sample_data/SPY.csv"
 date_col = "Date"
 close_col = "Adj Close"
 return_col = "market_return"
@@ -247,10 +247,10 @@ def train_model(model, train_loader, val_loader, max_epochs, lr, min_lr, l2, pat
         else:
             no_improve += 1
             if no_improve >= patience:
-                print("Early stopping at epoch {epoch} with best val loss {best_val_loss:.4f}, train loss {train_loss:.4f}, and val_acc {val_acc:.4f}".format(epoch, best_val_loss, train_loss, val_acc))
+                print("Early stopping at epoch {epoch} with best val loss {best_val_loss:.4f}, train loss {train_loss:.4f}, and val_acc {val_acc:.4f}".format(epoch=epoch, best_val_loss=best_val_loss, train_loss=train_loss, val_acc=val_acc))
                 break
         if epoch % 50 == 0:
-            print("Epoch {epoch}: Train Loss {train_loss:.4f}, Val Loss {val_loss:.4f}, Val Acc {val_acc:.4f}".format(epoch, train_loss, val_loss, val_acc))
+            print("Epoch {epoch}: Train Loss {train_loss:.4f}, Val Loss {val_loss:.4f}, Val Acc {val_acc:.4f}".format(epoch=epoch, train_loss=train_loss, val_loss=val_loss, val_acc=val_acc))
 
     model.load_state_dict(best_state)
     return history 
